@@ -1,0 +1,25 @@
+[
+  {
+    "id": "vixsrc",
+    "name": "Vixsrc",
+    "description": "Vixsrc direct HLS provider for Nuvio",
+    "version": "1.0.0",
+    "author": "settimio",
+    "supportedTypes": [
+      "movie",
+      "tv"
+    ],
+    "filename": "providers/vixsrc.js",
+    "enabled": true,
+    "formats": [
+      "m3u8"
+    ],
+    "logo": "https://i.postimg.cc/tJP8zc5K/vixsrc.png",
+    "contentLanguage": [
+      "en"
+    ],
+    "limited": false,
+    "disabledPlatforms": [],
+    "supportsExternalPlayer": true
+  }
+]
