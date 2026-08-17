@@ -5,14 +5,13 @@
     {
       "id": "vixsrc",
       "name": "Vixsrc",
-      "description": "Vixsrc provider",
+      "description": "Vixsrc M3U8 streaming with auto quality selection",
       "version": "1.0.0",
-      "author": "settimio",
+      "author": "Nuvio Team",
       "supportedTypes": ["movie", "tv"],
-      "filename": "vixsrc.js",
+      "filename": "providers/vixsrc.js",
       "enabled": true,
-      "formats": ["m3u8"],
-      "logo": "https://i.postimg.cc/tJP8zc5K/vixsrc.png",
+      "logo": "https://vixsrc.to/favicon.ico",
       "contentLanguage": ["en"]
     }
   ]
