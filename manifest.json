@@ -9,7 +9,7 @@
       "movie",
       "tv"
     ],
-    "filename": "providers/vixsrc.js",
+    "filename": "vixsrc.js",
     "enabled": true,
     "formats": [
       "m3u8"
