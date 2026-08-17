@@ -1,16 +1,15 @@
 // Standalone VixSrc provider for Nuvio.
-// Based on the public Nuvio provider pattern used by plugins_nuvio.
-// No npm dependencies are required.
+// Uses VixSrc's current API -> embed-page flow.
 
 const BASE_URL = "https://vixsrc.to";
 
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 function request(url, options = {}) {
   const headers = {
-    "User-Agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    Accept: "*/*",
-    "Accept-Language": "en-US,en;q=0.5",
+    "User-Agent": USER_AGENT,
     ...(options.headers || {})
   };
 
@@ -20,84 +19,168 @@ function request(url, options = {}) {
     headers
   }).then((response) => {
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const error = new Error(
+        `HTTP ${response.status}: ${response.statusText}`
+      );
+      error.status = response.status;
+      throw error;
     }
+
     return response;
   });
 }
 
-function buildVixSrcUrl(tmdbId, mediaType, seasonNum, episodeNum) {
+function buildApiUrl(
+  tmdbId,
+  mediaType,
+  seasonNum,
+  episodeNum,
+  language = "en"
+) {
+  if (!tmdbId) {
+    throw new Error("TMDB id is required");
+  }
+
+  let path;
+
   if (mediaType === "tv") {
     if (seasonNum == null || episodeNum == null) {
       throw new Error("TV requests require season and episode numbers");
     }
-    return `${BASE_URL}/tv/${tmdbId}/${seasonNum}/${episodeNum}`;
+
+    path = `/api/tv/${tmdbId}/${seasonNum}/${episodeNum}`;
+  } else {
+    path = `/api/movie/${tmdbId}`;
   }
 
-  return `${BASE_URL}/movie/${tmdbId}`;
+  return `${BASE_URL}${path}?lang=${encodeURIComponent(language)}`;
 }
 
-function extractMasterPlaylist(html) {
-  // VixSrc commonly exposes a master-playlist config in the page.
-  const masterBlock = html.match(/window\.masterPlaylist\s*=\s*\{([\s\S]*?)\}/i);
+function resolveUrl(pathOrUrl) {
+  if (!pathOrUrl) return null;
 
-  if (masterBlock) {
-    const block = masterBlock[1];
-    const urlMatch = block.match(/url\s*:\s*["']([^"']+)["']/i);
-    const tokenMatch = block.match(/["']?token["']?\s*:\s*["']([^"']+)["']/i);
-    const expiresMatch = block.match(/["']?expires["']?\s*:\s*["']([^"']+)["']/i);
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    return pathOrUrl;
+  }
 
-    if (urlMatch && tokenMatch && expiresMatch) {
-      const base = urlMatch[1];
-      const join = base.includes("?") ? "&" : "?";
-      return `${base}${join}token=${encodeURIComponent(tokenMatch[1])}` +
-        `&expires=${encodeURIComponent(expiresMatch[1])}&h=1&lang=en`;
+  return `${BASE_URL}/${String(pathOrUrl).replace(/^\/+/, "")}`;
+}
+
+function fetchEmbedDescriptor(apiUrl) {
+  return request(apiUrl, {
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: `${BASE_URL}/`
     }
-  }
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      if (
+        !data ||
+        typeof data.src !== "string" ||
+        !data.src.trim()
+      ) {
+        throw new Error(
+          "VixSrc API response did not contain a valid src field"
+        );
+      }
 
-  // Fallback for pages exposing a direct HLS URL.
-  const direct = html.match(/https?:\/\/[^"'\\\s<>]+(?:\.m3u8|\/playlist\/)[^"'\\\s<>]*/i);
-  return direct ? direct[0].replace(/\\u0026/g, "&").replace(/\\\//g, "/") : null;
+      return {
+        src: data.src,
+        embedUrl: resolveUrl(data.src)
+      };
+    });
 }
 
-function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = null) {
-  let pageUrl;
+function loadEmbedPage(embedUrl) {
+  return request(embedUrl, {
+    headers: {
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: `${BASE_URL}/`
+    }
+  }).then((response) => response.text());
+}
+
+function validateEmbedPage(embedUrl, apiUrl) {
+  return loadEmbedPage(embedUrl)
+    .then((html) => ({
+      html,
+      embedUrl
+    }))
+    .catch((error) => {
+      if (error && error.status === 410) {
+        console.log(
+          "[Vixsrc] Embed expired with HTTP 410; requesting fresh src"
+        );
+
+        return fetchEmbedDescriptor(apiUrl).then((fresh) =>
+          loadEmbedPage(fresh.embedUrl).then((html) => ({
+            html,
+            embedUrl: fresh.embedUrl
+          }))
+        );
+      }
+
+      throw error;
+    });
+}
+
+function getStreams(
+  tmdbId,
+  mediaType = "movie",
+  seasonNum = null,
+  episodeNum = null
+) {
+  let apiUrl;
 
   try {
-    pageUrl = buildVixSrcUrl(tmdbId, mediaType, seasonNum, episodeNum);
+    apiUrl = buildApiUrl(
+      tmdbId,
+      mediaType,
+      seasonNum,
+      episodeNum,
+      "en"
+    );
   } catch (error) {
     console.error(`[Vixsrc] ${error.message}`);
     return Promise.resolve([]);
   }
 
-  console.log(`[Vixsrc] Fetching ${pageUrl}`);
+  console.log(`[Vixsrc] API request: ${apiUrl}`);
 
-  return request(pageUrl, {
-    headers: {
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    }
-  })
-    .then((response) => response.text())
-    .then((html) => {
-      const streamUrl = extractMasterPlaylist(html);
+  return fetchEmbedDescriptor(apiUrl)
+    .then((descriptor) => {
+      console.log(`[Vixsrc] Embed URL: ${descriptor.embedUrl}`);
 
-      if (!streamUrl) {
-        console.log("[Vixsrc] No playable HLS playlist found");
+      return validateEmbedPage(
+        descriptor.embedUrl,
+        apiUrl
+      );
+    })
+    .then(({ html, embedUrl }) => {
+      if (!html || html.length < 20) {
+        console.log("[Vixsrc] Embed page was empty");
         return [];
       }
+
+      console.log(
+        `[Vixsrc] Embed page loaded successfully (${html.length} chars)`
+      );
 
       return [
         {
           name: "Vixsrc",
-          title: "Auto Quality",
-          url: streamUrl,
+          title: "VixSrc Player",
+          url: embedUrl,
           quality: "Auto",
-          type: "direct",
+          type: "web",
           headers: {
             Referer: `${BASE_URL}/`,
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
-              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": USER_AGENT
           }
         }
       ];
@@ -108,8 +191,15 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
     });
 }
 
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { getStreams };
+if (
+  typeof module !== "undefined" &&
+  module.exports
+) {
+  module.exports = {
+    getStreams
+  };
 } else {
-  global.VixsrcScraperModule = { getStreams };
+  global.VixsrcScraperModule = {
+    getStreams
+  };
 }
