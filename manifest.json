@@ -9,7 +9,7 @@
       "version": "1.0.0",
       "author": "Nuvio Team",
       "supportedTypes": ["movie", "tv"],
-      "filename": "providers/vixsrc.js",
+      "filename": "vixsrc.js",
       "enabled": true,
       "logo": "https://vixsrc.to/favicon.ico",
       "contentLanguage": ["en"]
